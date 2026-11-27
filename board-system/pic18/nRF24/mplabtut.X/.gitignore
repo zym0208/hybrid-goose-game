@@ -1,0 +1,45 @@
+# --- MPLAB X 编译输出目录 (最占空间的部分) ---
+# 忽略编译生成的中间文件
+build/
+*/build/
+# 忽略最终生成的 hex/elf 文件目录
+dist/
+*/dist/
+# 忽略调试目录
+debug/
+*/debug/
+disassembly/
+*/disassembly/
+
+# --- MPLAB X 用户私有配置 (不要上传) ---
+# 这里的配置包含你当前的窗口布局、打开的文件等，每个人都不同
+nbproject/private/
+*/nbproject/private/
+
+# --- 临时文件和备份文件 ---
+*.bkx
+*.tmp
+*.sdb
+*.sym
+*.obj
+*.o
+*.rlf
+*.lst
+*.p1
+*.pre
+*.cmf
+*.elf
+*.hex
+*.hxl
+*.map
+*funclist
+*l.obj
+*d
+
+# --- 系统文件 ---
+.DS_Store
+Thumbs.db
+
+# --- 注意 ---
+# 必须要保留 nbproject/ 下的其他 xml 和 mk 文件
+# 必须要保留 *.mc3 文件 (MCC的配置文件)

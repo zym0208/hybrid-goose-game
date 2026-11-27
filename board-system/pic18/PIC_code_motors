@@ -1,0 +1,254 @@
+#include "mcc_generated_files/system/system.h"
+#include <xc.h>
+
+// PIN ASSIGNMENT
+#define STEP_X_LAT LATBbits.LATB5
+#define DIR_X_LAT  LATBbits.LATB4
+#define EN_X_LAT   LATBbits.LATB3
+#define STEP_Y_LAT LATBbits.LATB2  // Optional for Y-axis
+#define DIR_Y_LAT  LATBbits.LATB1  // Optional for Y-axis
+#define EN_Y_LAT   LATBbits.LATB0  // Optional for Y-axis
+
+// GLOBAL VARIABLES - POSITION
+volatile int pos_X = 0;
+volatile int pos_Y = 0;
+volatile int target_X = 0;
+volatile int target_Y = 0;
+
+// GLOBAL VARIABLES - PROTOCOL DATA
+volatile uint8_t temp_pos_X = 0;
+volatile uint8_t temp_pos_Y = 0;
+volatile uint8_t placeX = 0;
+volatile uint8_t placeY = 0;
+volatile uint8_t ID = 0;
+
+
+// FLAGS AND MOVEMENT CONTROL
+volatile bool new_data_received = false;
+volatile bool movement_in_progress = false;
+volatile bool x_axis_moving = false;
+volatile bool y_axis_moving = false;
+
+// STEP COUNTING
+volatile uint8_t step_count = 0;
+
+// FUNCTION: SEND NRF DATA (placeholder)
+void send_bytes_via_nrf(uint8_t byte1, uint8_t byte2) {
+    // TODO: Implement NRF24L01 transmission
+    // - Switch to TX mode
+    // - Load data into TX FIFO
+    // - Transmit
+    // - Wait for TX_DS or MAX_RT
+    // - Switch back to RX mode
+}
+
+// FUNCTION: CHECK NRF DATA (placeholder)
+void check_nrf_data(void) {
+    // TODO: Implement NRF24L01 reception check
+    // - Check RX_DR flag
+    // - Read data from RX FIFO
+    // - Call extract_data() with received bytes
+    // - Clear interrupt flag
+    
+    // Example for testing purposes (comment this out during NRF implementation):
+    // if (data_received) {
+    //     extract_data(received_byte1, received_byte2);
+    //     new_data_received = true;
+    // }
+}
+
+
+// FUNCTION: DATA EXTRACTION AND PROCESSING
+void extract_data(uint8_t byte1, uint8_t byte2) {
+    // Combine 2 bytes into 16-bit data
+    uint16_t data = (byte1 << 8) | byte2;
+    
+    // Extract all fields according to protocol
+    temp_pos_X = (data >> 11) & 0x1F;       // bits 15-11 (0-31)
+    temp_pos_Y = (data >> 6) & 0x1F;        // bits 10-6 (0-31)
+    uint8_t place_bit = (data >> 5) & 0x01; // bit 5
+    ID = (data >> 4) & 0x01;                // bit 4
+    uint8_t request = (data >> 3) & 0x01;   // bit 3
+    
+    // Store place_bit in correct variable
+    if (ID == 0) {
+        placeX = place_bit;
+    } else {
+        placeY = place_bit;
+    }
+    
+    // If request bit is set, echo the message back
+    if (request == 1) {
+        // Construct response (exactly the same data)
+        uint16_t response_data = (temp_pos_X << 11)
+                               | (temp_pos_Y << 6)
+                               | (place_bit << 5)
+                               | (ID << 4)
+                               | (request << 3);
+        
+        uint8_t response_byte1 = (response_data >> 8) & 0xFF;
+        uint8_t response_byte2 = response_data & 0xFF;
+        
+        // Send via NRF
+        send_bytes_via_nrf(response_byte1, response_byte2);
+    }
+    else {
+        // ACK
+        // Always send an ACK after processing
+        // Format: 00000000000I100 (where I = ID bit)
+        uint16_t ack_data = (ID << 3) | 0b100;
+        uint8_t ack_byte1 = (ack_data >> 8) & 0xFF;  // Will always be 0x00
+        uint8_t ack_byte2 = ack_data & 0xFF;         // Contains ID and "100"
+        
+        //Send ACK via NRF
+        send_bytes_via_nrf(ack_byte1, ack_byte2);
+        
+        //UPDATE TARGET POSITION
+        target_X = temp_pos_X;
+        target_Y = temp_pos_Y;
+        
+        // Mark that new data has been received
+        new_data_received = true;
+    }
+}
+// TIMER0 INTERRUPT - STEP GENERATOR
+void Step(void) {
+    // Generate X-axis step
+    if (x_axis_moving) {
+        if (step_count >= 10) {
+            STEP_X_LAT = 1;
+            step_count = 0;
+            
+            // Update position depending on direction
+            if (DIR_X_LAT == 1) {
+                pos_X++;
+            } else {
+                pos_X--;
+            }
+            
+            // Check if target is reached
+            if (pos_X == target_X) {
+                x_axis_moving = false;
+            }
+        } else {
+            step_count++;
+            STEP_X_LAT = 0;
+        }
+    }
+    
+    // Generate Y-axis step (if implemented)
+    // if (y_axis_moving) {
+    //     if (step_count >= 10) {
+    //         STEP_Y_LAT = 1;
+    //         
+    //         if (DIR_Y_LAT == 1) {
+    //             pos_Y++;
+    //         } else {
+    //             pos_Y--;
+    //         }
+    //         
+    //         if (pos_Y == target_Y) {
+    //             y_axis_moving = false;
+    //         }
+    //     } else {
+    //         STEP_Y_LAT = 0;
+    //     }
+    // }
+}
+// FUNCTION: START MOVEMENT
+void start_movement(void) {
+    // Check if there is new data and if we're not already moving
+    if (!new_data_received || movement_in_progress) {
+        return;
+    }
+    
+    movement_in_progress = true;
+    new_data_received = false;
+    
+    // Calculate difference for X-axis
+    int x_diff = target_X - pos_X;
+    
+    if (x_diff != 0) {
+        // Set direction
+        if (x_diff > 0) {
+            DIR_X_LAT = 1;  // Forward (positive direction)
+        } else {
+            DIR_X_LAT = 0;  // Backward (negative direction)
+        }
+        
+        // Start movement (Timer0 ISR will generate steps)
+        x_axis_moving = true;
+        step_count = 0;
+    } else {
+        // No movement needed
+        movement_in_progress = false;
+    }
+    
+    // Y-axis movement (if implemented)
+    // int y_diff = target_Y - pos_Y;
+    // if (y_diff != 0) {
+    //     if (y_diff > 0) {
+    //         DIR_Y_LAT = 1;
+    //     } else {
+    //         DIR_Y_LAT = 0;
+    //     }
+    //     y_axis_moving = true;
+    // }
+}
+// Main
+int main(void) {
+    // System initialization
+    SYSTEM_Initialize();
+    
+    // Enable interrupts
+    INTCON0bits.GIE = 1; 
+    INTERRUPT_GlobalInterruptHighEnable(); 
+    INTERRUPT_GlobalInterruptLowEnable();
+    
+    // Configure stepper motor pins for X-axis
+    ANSELB = 0;  // All PORTB pins as digital I/O
+    TRISBbits.TRISB5 = 0;  // STEP X as output
+    TRISBbits.TRISB4 = 0;  // DIR X as output
+    TRISBbits.TRISB3 = 0;  // EN X as output
+    
+    TRISBbits.TRISB2 = 0;  // STEP Y as output
+    TRISBbits.TRISB1 = 0;  // DIR Y as output
+    TRISBbits.TRISB0 = 0;  // EN Y as output
+    
+    // Initial pin values
+    EN_X_LAT = 0;    // Enable driver (active low)
+    DIR_X_LAT = 0;   // Direction 0
+    STEP_X_LAT = 0;  // Step low
+    EN_Y_LAT = 0;
+    DIR_Y_LAT = 0;
+    STEP_Y_LAT = 0;
+    
+    // TODO: NRF24L01 initialization
+    // - Configure SPI interface (done in SYSTEM_Initialize)
+    // - Configure NRF registers (RX mode, channel, address, etc.)
+    // - Power up and set to RX mode
+    
+    // Register Timer0 callback
+    TMR0_OverflowCallbackRegister(Step);
+    
+    // Main loop
+    while(1) {
+        // Check if data has been received via NRF
+        check_nrf_data();
+        
+        // Start movement if there is new data
+        start_movement();
+        
+        // Check if movement is complete
+        if (movement_in_progress && !x_axis_moving && !y_axis_moving) {
+            movement_in_progress = false;
+            // Movement complete - additional actions can be performed here
+            
+        }
+        
+        // Other tasks
+  
+    }
+    
+    return 0;
+}

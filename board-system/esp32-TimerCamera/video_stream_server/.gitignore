@@ -1,0 +1,16 @@
+# ESP-IDF build output
+/build/
+/managed_components/
+dependencies.lock
+
+# SDK configuration files
+# /sdkconfig
+/sdkconfig.old
+
+# Other generated files
+*.bin
+*.elf
+*.map
+
+# VS Code settings
+.vscode/
